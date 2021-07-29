@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 import React, { useCallback, useRef, useState } from 'react';
 import {
-    Alert,
+  Alert,
   Button,
   ControlLabel,
   Form,
@@ -12,7 +12,7 @@ import {
   Schema,
 } from 'rsuite';
 import firebase from 'firebase/app';
-import { database } from '../misc/firebase';
+import { auth, database } from '../misc/firebase';
 import { useModalState } from '../misc/custom-hooks';
 
 const { StringType } = Schema.Types;
@@ -38,27 +38,28 @@ const CreateRoomBtnModal = () => {
 
   const submit = async () => {
     if (!FormRef.current.check()) {
-        return
+      return;
     }
     setIsLoading(true);
 
     const newRoomData = {
-        ...formValue,
-        createdAt: firebase.database.ServerValue.TIMESTAMP
-    }
+      ...formValue,
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+      admins: { [auth.currentUser.uid]: true },
+      fcmUsers: {[auth.currentUser.uid]: true},
+    };
 
     try {
-        await database.ref('rooms').push(newRoomData); 
-        Alert.info(`${formValue.name} has been created`, 4000);
-        setIsLoading(false);
-        setFormValue(INITIAL_FORM);
-        close();
-
+      await database.ref('rooms').push(newRoomData);
+      Alert.info(`${formValue.name} has been created`, 4000);
+      setIsLoading(false);
+      setFormValue(INITIAL_FORM);
+      close();
     } catch (err) {
-        setIsLoading(false);
-        Alert.error(err.message);
+      setIsLoading(false);
+      Alert.error(err.message);
     }
-  }
+  };
 
   return (
     <div className="mt-1">
@@ -93,16 +94,19 @@ const CreateRoomBtnModal = () => {
                 placeholder="Enter room description..."
               />
             </FormGroup>
-
           </Form>
         </Modal.Body>
 
         <Modal.Footer>
-          <Button block appearance="primary" onClick={submit} disabled={isLoading}>
+          <Button
+            block
+            appearance="primary"
+            onClick={submit}
+            disabled={isLoading}
+          >
             Create new chat room
           </Button>
         </Modal.Footer>
-
       </Modal>
     </div>
   );

@@ -1,5 +1,17 @@
+/* eslint-disable no-console */
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, database } from '../misc/firebase';
+import firebase from 'firebase/app';
+import { auth, database, messaging } from '../misc/firebase';
+
+export const isOfflineForDatabase = {
+  state: 'offline',
+  last_changed: firebase.database.ServerValue.TIMESTAMP,
+};
+
+export const isOnlineForDatabase = {
+  state: 'online',
+  last_changed: firebase.database.ServerValue.TIMESTAMP,
+};
 
 const ProfileContext = createContext();
 
@@ -8,12 +20,17 @@ export const ProfileProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-      let userRef;
-    const authUnsub = auth.onAuthStateChanged(authObj => {
+    let userRef;
+    let userStatusref;
+    let tokenRefreshUnsub;
+
+    const authUnsub = auth.onAuthStateChanged(async authObj => {
       if (authObj) {
-        userRef = database.ref(`/profiles/${authObj.uid}`)
+        userRef = database.ref(`/profiles/${authObj.uid}`);
+        userStatusref = database.ref(`/status/${authObj.uid}`);
+
         userRef.on('value', snapshot => {
-          const {name, createdAt, avatar} = snapshot.val();
+          const { name, createdAt, avatar } = snapshot.val();
 
           const data = {
             name,
@@ -26,11 +43,63 @@ export const ProfileProvider = ({ children }) => {
           setProfile(data);
           setIsLoading(false);
         });
-      } else {
+         
 
+        database
+          .ref('.info/connected')
+          .on('value', snapshot => {
+            if (!!snapshot.val() === false) {
+              return;
+            }
+
+            userStatusref
+              .onDisconnect()
+              .set(isOfflineForDatabase)
+              .then(() => {
+                userStatusref.set(isOnlineForDatabase);
+              });
+          });
+
+          if (messaging) {
+            try {
+              const currentToken = await messaging.getToken();
+              if (currentToken) {
+                await database
+                  .ref(`/fcm_tokens/${currentToken}`)
+                  .set(authObj.uid);
+              }
+            } catch (err) {
+              console.log('An error occurred while retrieving token. ', err);
+            }
+  
+            tokenRefreshUnsub = messaging.onTokenRefresh(async () => {
+              try {
+                const currentToken = await messaging.getToken();
+                if (currentToken) {
+                  await database
+                    .ref(`/fcm_tokens/${currentToken}`)
+                    .set(authObj.uid);
+                }
+              } catch (err) {
+                console.log('An error occurred while retrieving token. ', err);
+              }
+            });
+          }
+
+      } else {
         if (userRef) {
-            userRef.off();
+          userRef.off();
         }
+
+        if(userStatusref) {
+          userStatusref.off();
+        }
+
+        if (tokenRefreshUnsub) {
+          tokenRefreshUnsub();
+        }
+
+        database.ref('.info/connected').off();
 
         setProfile(null);
         setIsLoading(false);
@@ -38,11 +107,21 @@ export const ProfileProvider = ({ children }) => {
     });
 
     return () => {
-        authUnsub();
-        if(userRef) {
-            userRef.off();
-        }
-    }
+      authUnsub();
+      database.ref('.info/connected').off();
+
+      if (userRef) {
+        userRef.off();
+      }
+
+      if (tokenRefreshUnsub) {
+        tokenRefreshUnsub();
+      }
+
+      if(userStatusref) {
+        userStatusref.off();
+      }
+    };
   }, []);
 
   return (
